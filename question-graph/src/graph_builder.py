@@ -35,19 +35,15 @@ def add_attrs(graph, node_id, **attrs):
     )
 
 
-def main():
-    problems = load_json(PROBLEM_FILE)
-    topics = load_json(TOPIC_FILE)
-    problem_topic_edges = load_json(PROBLEM_TOPIC_EDGE_FILE)
-    topic_topic_edges = load_json(TOPIC_TOPIC_EDGE_FILE)
-
-    G = nx.DiGraph()
+def build_graph(problems, topics, problem_topic_edges, topic_topic_edges):
+    graph = nx.DiGraph()
+    unresolved_edges = []
 
     for p in problems:
         problem_id = p["problem_id"]
 
         add_attrs(
-            G,
+            graph,
             f"problem:{problem_id}",
             node_type="problem",
             problem_id=problem_id,
@@ -70,7 +66,7 @@ def main():
         topic_id = t["topic_id"]
 
         add_attrs(
-            G,
+            graph,
             f"topic:{topic_id}",
             node_type="topic",
             topic_id=topic_id,
@@ -84,8 +80,14 @@ def main():
         problem_node = f"problem:{e['problem_id']}"
         topic_node = f"topic:{e['topic_id']}"
 
-        if problem_node in G and topic_node in G:
-            G.add_edge(
+        missing_nodes = [node for node in (problem_node, topic_node) if node not in graph]
+        if missing_nodes:
+            unresolved_edges.append(
+                f"problem-topic edge {e!r} references missing node(s): "
+                f"{', '.join(missing_nodes)}"
+            )
+        else:
+            graph.add_edge(
                 problem_node,
                 topic_node,
                 edge_type="has_topic",
@@ -96,22 +98,45 @@ def main():
         source_topic = f"topic:{e['source_topic_id']}"
         target_topic = f"topic:{e['target_topic_id']}"
 
-        if source_topic in G and target_topic in G:
-            G.add_edge(
+        missing_nodes = [node for node in (source_topic, target_topic) if node not in graph]
+        if missing_nodes:
+            unresolved_edges.append(
+                f"topic-topic edge {e!r} references missing node(s): "
+                f"{', '.join(missing_nodes)}"
+            )
+        else:
+            graph.add_edge(
                 source_topic,
                 target_topic,
                 edge_type=e.get("relation_type", "prerequisite"),
-                strength=e.get("strength", 1.0),
+                strength=clean_value(e.get("strength", 1.0)),
             )
+
+    if unresolved_edges:
+        details = "\n".join(f"- {error}" for error in unresolved_edges)
+        raise ValueError(
+            f"Cannot build graph: {len(unresolved_edges)} unresolved edge(s):\n{details}"
+        )
+
+    return graph
+
+
+def main():
+    problems = load_json(PROBLEM_FILE)
+    topics = load_json(TOPIC_FILE)
+    problem_topic_edges = load_json(PROBLEM_TOPIC_EDGE_FILE)
+    topic_topic_edges = load_json(TOPIC_TOPIC_EDGE_FILE)
+
+    graph = build_graph(problems, topics, problem_topic_edges, topic_topic_edges)
 
     print("Problems:", len(problems))
     print("Topics:", len(topics))
     print("Problem-topic edges:", len(problem_topic_edges))
     print("Topic-topic edges:", len(topic_topic_edges))
-    print("Graph nodes:", G.number_of_nodes())
-    print("Graph edges:", G.number_of_edges())
+    print("Graph nodes:", graph.number_of_nodes())
+    print("Graph edges:", graph.number_of_edges())
 
-    nx.write_graphml(G, OUTPUT_GRAPH)
+    nx.write_graphml(graph, OUTPUT_GRAPH)
     print(f"Saved graph -> {OUTPUT_GRAPH}")
 
 
