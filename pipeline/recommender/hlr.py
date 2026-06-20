@@ -99,7 +99,9 @@ def calculate_urgency(hlr_state, current_timestamp):
     if last_review is None:
         return 0.5
 
-    last_review_dt = datetime.fromisoformat(last_review).replace(tzinfo=timezone.utc) if datetime.fromisoformat(last_review).tzinfo is None else datetime.fromisoformat(last_review)
+    last_review_dt = datetime.fromisoformat(last_review)
+    if last_review_dt.tzinfo is None:
+     last_review_dt = last_review_dt.replace(tzinfo=timezone.utc)
     now_dt = datetime.fromtimestamp(current_timestamp, tz=timezone.utc)
     days_since = (now_dt - last_review_dt).total_seconds() / 86400
 
@@ -156,7 +158,7 @@ def process_hlr(submission, user_hlr_state):
             days_since = 0
 
         new_half_life = update_half_life(current_half_life, performance, days_since)
-        p_recall = recall_probability(new_half_life, 0)
+        p_recall = recall_probability(new_half_life, days_since)
         next_review_days = round(-new_half_life * math.log2(0.7), 1)
 
         new_state = {
