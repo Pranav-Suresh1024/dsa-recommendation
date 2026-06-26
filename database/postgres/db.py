@@ -16,7 +16,7 @@ def get_user_mastery(user_id: str) -> dict:
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT topic_id, mastery_score FROM user_topic_mastery WHERE user_id = %s",
+                "SELECT topic_id, mastery_score FROM user_topic_mastery WHERE user_id = %s ORDER BY updated_at DESC",
                 (user_id,)
             )
             rows = cur.fetchall()

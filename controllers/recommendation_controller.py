@@ -130,7 +130,7 @@ def handle_recommend(user_id, limit):
         candidates=candidates,
         user_bkt_mastery=mastery,
         user_hlr_state=hlr_state,
-        recent_topics=list(mastery.keys())[-10:],
+        recent_topics=list(mastery.keys())[:10],
         topic_topic_edges=tt_edges,
         current_timestamp=current_time
     )
