@@ -3,7 +3,7 @@ name = "dsa-ml"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     "accelerate>=1.14.0",
     "fastapi>=0.137.2",
@@ -31,4 +31,7 @@ dependencies = [
     "sentence-transformers>=2.2.0",
     "numpy>=1.24.0",
     "pydantic>=2.0.0",
+    "psycopg2-binary>=2.9.0",
+    "python-dotenv>=1.0.0",
+    "requests>=2.28.0"
 ]
