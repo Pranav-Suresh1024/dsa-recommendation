@@ -34,6 +34,14 @@ from pathlib import Path
 
 import numpy as np
 
+# CLI evaluator — not a pytest module (excluded via conftest.py)
+# Run: python pipeline/graphs/test_rgcn_embeddings.py
+import sys
+from pathlib import Path
+# Ensure pipeline/graphs/ is on path when invoked from repo root
+_HERE = Path(__file__).parent
+if str(_HERE) not in sys.path:
+    sys.path.insert(0, str(_HERE))
 import config as C
 
 RGCN_DIM = C.OUT_DIM

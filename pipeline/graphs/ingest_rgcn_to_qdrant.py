@@ -40,27 +40,28 @@ EMBED_KEYS = {"question_embedding", "solution_embedding", "rgcn_embedding",
 # Core upsert
 # ---------------------------------------------------------------------------
 
+def _stable_point_id(problem_id: str) -> int:
+    """
+    Convert a problem_id string to a stable integer Qdrant point ID.
+    Uses xxhash (fast, no collisions at this scale) falling back to
+    the built-in hash truncated to 63 bits.
+    The same problem_id must map to the same integer across ALL collections
+    so cross-collection joins by ID are correct.
+    """
+    try:
+        import xxhash
+        return xxhash.xxh64(problem_id).intdigest() & 0x7FFF_FFFF_FFFF_FFFF
+    except ImportError:
+        import hashlib
+        return int(hashlib.sha256(problem_id.encode()).hexdigest(), 16) & 0x7FFF_FFFF_FFFF_FFFF
+
+
 def ingest_embeddings(client, collection, ids, vectors, payloads, batch_size=128):
     from qdrant_client.models import (
         Distance, VectorParams, PointStruct, OptimizersConfigDiff,
     )
-    # Build (qdrant_point_id, vector) pairs using a stable integer derived from
-    # the problem_id string — NOT from enumerate() position. Using enumerate()
-    # was the original bug: if the None-filtered subsets differ across collections
-    # (e.g. problems_question has fewer non-None vectors than problems_rgcn),
-    # the same problem ends up with different point IDs in each collection,
-    # making cross-collection lookups by ID impossible.
-    def _stable_id(problem_id: str) -> int:
-        # Deterministic 63-bit int from problem_id string — collision-free in practice
-        # for datasets under ~1M problems.
-        import hashlib
-        return int(hashlib.sha256(str(problem_id).encode()).hexdigest(), 16) % (2 ** 63)
-
-    valid = [
-        (_stable_id(ids[i]), v)
-        for i, v in enumerate(vectors)
-        if v is not None
-    ]
+    # ids[i] is the problem_id string; vectors[i] may be None for missing embeddings
+    valid = [(ids[i], v) for i, v in enumerate(vectors) if v is not None]
     if not valid:
         print(f"[X] nothing to ingest into '{collection}' (all vectors None)")
         return
@@ -78,9 +79,14 @@ def ingest_embeddings(client, collection, ids, vectors, payloads, batch_size=128
     else:
         print(f"[->] '{collection}' exists -- upserting")
 
+    pid_to_payload = {pid: payloads[i] for i, pid in enumerate(ids)}
     points = [
-        PointStruct(id=pt_id, vector=list(map(float, v)), payload=payloads[orig_i])
-        for orig_i, (pt_id, v) in enumerate(valid)
+        PointStruct(
+            id=_stable_point_id(pid),
+            vector=list(map(float, v)),
+            payload={**pid_to_payload.get(pid, {}), "problem_id": pid},
+        )
+        for pid, v in valid
     ]
     t0 = time.time()
     for start in range(0, len(points), batch_size):
@@ -137,16 +143,21 @@ def from_artifacts_and_parquet():
     """
     import torch, pandas as pd
 
-    if not C.GRAPH_PATH.exists() or not C.EMB_NPY.exists():
+    _npz_path  = C.ARTIFACTS_DIR / "graph_tensors.npz"
+    _meta_path = C.ARTIFACTS_DIR / "graph_meta.json"
+
+    if not _npz_path.exists() or not C.EMB_NPY.exists():
         raise FileNotFoundError(
-            f"Need {C.GRAPH_PATH} and {C.EMB_NPY} -- "
+            f"Need {_npz_path} and {C.EMB_NPY} -- "
             f"run build_graph.py + train_rgcn.py first.")
 
-    graph = torch.load(C.GRAPH_PATH, weights_only=False)
-    rgcn  = np.load(C.EMB_NPY).astype(np.float32)
-    ids   = graph["problem_ids"]
-    meta  = graph.get("problem_meta", [{} for _ in ids])
-    feats = graph["problem_features"].numpy().astype(np.float32)  # QS 1792-d
+    import json as _json
+    _t   = np.load(_npz_path, allow_pickle=False)
+    _m   = _json.load(open(_meta_path, encoding="utf-8"))
+    rgcn = np.load(C.EMB_NPY).astype(np.float32)
+    ids  = _m["problem_ids"]
+    meta = _m["problem_meta"]
+    X_prob = _t["problem_features"].astype(np.float32)
 
     # build payloads
     payloads = []
@@ -158,14 +169,14 @@ def from_artifacts_and_parquet():
     # full = QS + RGCN
     full = []
     for i in range(len(ids)):
-        v = np.concatenate([feats[i], rgcn[i]]).astype(np.float32)
+        v = np.concatenate([X_prob[i], rgcn[i]]).astype(np.float32)
         n = np.linalg.norm(v)
         full.append(v / (n or 1.0))
 
     # question + solution from parquet
     q_vecs  = [None] * len(ids)
     s_vecs  = [None] * len(ids)
-    qs_vecs = list(feats)   # already have QS from graph features
+    qs_vecs = list(X_prob)   # already have QS from graph features
 
     if C.INPUT_PARQUET.exists():
         df = pd.read_parquet(C.INPUT_PARQUET)

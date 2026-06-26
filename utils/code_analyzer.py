@@ -164,7 +164,6 @@ def extract_dfg_features(code: str) -> Dict[str, int]:
     Returns dict of {feature: 0_or_1}.
     """
     features = {}
-
     for ds_name, patterns in _DATA_STRUCTURE_PATTERNS.items():
         hit = 0
         for pattern in patterns:
@@ -435,7 +434,7 @@ class Solution:
     print(f"Feature vector shape : {features.shape}")
     print(f"Non-zero features    : {(features > 0).sum()}")
     print(f"Feature range        : [{features.min():.3f}, {features.max():.3f}]")
-
     enriched = build_semantic_text(test_code)
+    
     print(f"\nEnriched text for GraphCodeBERT:")
     print(enriched)

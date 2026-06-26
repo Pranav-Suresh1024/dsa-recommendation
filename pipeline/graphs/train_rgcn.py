@@ -180,7 +180,51 @@ def train():
 
     if not C.GRAPH_PATH.exists():
         raise FileNotFoundError(f"{C.GRAPH_PATH} not found -- run build_graph.py first.")
-    graph = torch.load(C.GRAPH_PATH, weights_only=False)
+
+    # ── Load graph from safe npz + json (no pickle) ──────────────────────────
+    _npz_path  = C.ARTIFACTS_DIR / "graph_tensors.npz"
+    _meta_path = C.ARTIFACTS_DIR / "graph_meta.json"
+
+    if _npz_path.exists() and _meta_path.exists():
+        # Preferred path: safe numpy arrays + JSON metadata
+        _t  = np.load(_npz_path, allow_pickle=False)
+        _m  = json.load(open(_meta_path, encoding="utf-8"))
+        uses_src    = torch.from_numpy(_t["uses_src"])
+        uses_dst    = torch.from_numpy(_t["uses_dst"])
+        uses_weight = torch.from_numpy(_t["uses_weight"])
+        sim_index   = torch.from_numpy(_t["sim_index"])
+        cc_index    = torch.from_numpy(_t["cc_index"])
+        cc_arr      = _t["cc_weight"]
+        cc_weight   = torch.from_numpy(cc_arr) if cc_arr.size else None
+        X_prob      = torch.from_numpy(_t["problem_features"])
+        X_con       = torch.from_numpy(_t["concept_features"])
+        graph = {
+            "node_features":     {"problem": X_prob, "concept": X_con},
+            "num_nodes":         _m["num_nodes"],
+            "relations": {
+                "uses":    ("problem", "concept",
+                            torch.stack([uses_src, uses_dst]), uses_weight),
+                "used_by": ("concept", "problem",
+                            torch.stack([uses_dst, uses_src]), uses_weight),
+                "similar": ("problem", "problem", sim_index, None),
+                "cooccurs":("concept", "concept", cc_index, cc_weight),
+            },
+            "problem_ids":      _m["problem_ids"],
+            "problem_slugs":    _m["problem_slugs"],
+            "problem_meta":     _m["problem_meta"],
+            "problem_features": X_prob,
+            "concepts":         _m["concepts"],
+            "meta":             _m["meta"],
+        }
+    else:
+        # Fallback: legacy .pt — only safe if you built it yourself locally
+        import warnings
+        warnings.warn(
+            "graph_tensors.npz not found; falling back to graph.pt (pickle). "
+            "Run build_graph.py to regenerate the safe format.",
+            UserWarning, stacklevel=2,
+        )
+        graph = torch.load(C.GRAPH_PATH, weights_only=False)  # nosec: local scratch only
 
     features = {t: v.to(device) for t, v in graph["node_features"].items()}
     adj = precompute_adj(graph, device)
@@ -287,13 +331,25 @@ def train():
 
     C.ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     np.save(C.EMB_NPY, prob_emb)
-    torch.save({"encoder": model.state_dict(), "decoder": decoder.state_dict(),
-                "in_dims": in_dims, "relations": rels, "scored": scored,
-                "hidden": C.HIDDEN_DIM, "out": C.OUT_DIM,
-                "best_cluster": best, "final_cluster": final_clus},
-               C.MODEL_PATH)
+    # Weights-only checkpoint: only state_dicts (tensors) — safe to load
+    torch.save({
+        "encoder": model.state_dict(),
+        "decoder": decoder.state_dict(),
+    }, C.MODEL_PATH)
+    # Architecture metadata saved as JSON (no pickle, human-readable)
+    _arch_path = C.ARTIFACTS_DIR / "model_arch.json"
+    json.dump({
+        "in_dims":      in_dims,
+        "relations":    rels,
+        "scored":       scored,
+        "hidden":       C.HIDDEN_DIM,
+        "out":          C.OUT_DIM,
+        "best_cluster": best,
+        "final_cluster": final_clus,
+    }, open(_arch_path, "w", encoding="utf-8"), indent=2)
     print(f"[OK] embeddings -> {C.EMB_NPY}  shape={prob_emb.shape}")
-    print(f"[OK] model      -> {C.MODEL_PATH}")
+    print(f"[OK] model      -> {C.MODEL_PATH}  (weights only, safe)")
+    print(f"[OK] arch meta  -> {_arch_path}")
 
     if C.WRITE_PARQUET:
         _write_parquet_artifact(graph, prob_emb)

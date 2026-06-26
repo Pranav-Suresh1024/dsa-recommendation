@@ -105,7 +105,7 @@ def build_solution_text(row: dict) -> Optional[str]:
         return None
 
     try:
-        from code_analyzer import build_semantic_text
+        from utils.code_analyzer import build_semantic_text
         enriched = build_semantic_text(sol)
         if enriched:
             return enriched[:1500]
@@ -228,6 +228,7 @@ def embed_dataframe(
     if resume:
         ckpt = load_checkpoint(output_dir)
         if ckpt is not None:
+            # Merge checkpoint embeddings into df
             embed_cols = [
                 "question_embedding", "solution_embedding",
                 "rgcn_embedding", "question_solution_embedding", "full_embedding",
@@ -235,19 +236,18 @@ def embed_dataframe(
             for col in embed_cols:
                 if col in ckpt.columns:
                     df[col] = ckpt[col].values
-        # A row is fully done only when ALL three pipeline steps are present.
-        # Checking only question_embedding was the original bug: a crash after
-        # step 1 would mark rows as done and silently skip steps 2 and 3.
-        def _fully_embedded(row) -> bool:
-            q_done  = row.get("question_embedding") is not None
-            s_done  = row.get("solution_embedding") is not None
-            qs_done = row.get("question_solution_embedding") is not None
-            return q_done and s_done and qs_done
-        todo_mask = ~df.apply(_fully_embedded, axis=1)
+        # Resume: a row needs work if ANY of the three embedding columns is missing.
+        # Checking only question_embedding would silently skip solution/combined
+        # if the process crashed after step 1 (Greptile P1 bug).
+        todo_mask = (
+            df["question_embedding"].isna()
+            | df["solution_embedding"].isna()
+            | df["question_solution_embedding"].isna()
+        )
         todo_idx  = df.index[todo_mask].tolist()
         done_n    = n - len(todo_idx)
         if done_n > 0:
-            print(f"[->] Resuming: {done_n} rows fully done, {len(todo_idx)} remaining")
+            print(f"[->] Resuming: {done_n} rows done, {len(todo_idx)} remaining")
     else:
         todo_idx = df.index.tolist()
 
@@ -278,7 +278,7 @@ def embed_dataframe(
 
     # Check if tree-sitter is available
     try:
-        from code_analyzer import build_semantic_text
+        from utils.code_analyzer import build_semantic_text
         print("[OK] Tree-sitter available -- using AST/CFG/DFG/PDG enrichment")
         semantic_mode = True
     except ImportError:

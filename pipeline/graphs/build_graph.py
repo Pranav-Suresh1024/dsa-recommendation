@@ -245,7 +245,57 @@ def build_graph() -> dict:
     }
 
     C.ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-    torch.save(graph, C.GRAPH_PATH)
+
+    # ── Save tensors as .npz (no pickle, safe to load) ───────────────────────
+    graph_npz_path = C.ARTIFACTS_DIR / "graph_tensors.npz"
+    np.savez(
+        graph_npz_path,
+        problem_features = X_problem,
+        concept_features = X_concept,
+        uses_src         = uses_src.numpy(),
+        uses_dst         = uses_dst.numpy(),
+        uses_weight      = uses_weight.numpy(),
+        sim_index        = sim_index.numpy(),
+        cc_index         = cc_index.numpy(),
+        cc_weight        = cc_weight.numpy() if cc_weight is not None
+                           else np.array([]),
+    )
+
+    # ── Save non-tensor metadata as JSON (human-readable, no pickle) ─────────
+    import json as _json
+    graph_meta_path = C.ARTIFACTS_DIR / "graph_meta.json"
+    # problem_meta contains dicts of python primitives only
+    _safe_meta = []
+    for m in [pr.meta for pr in problems]:
+        safe = {}
+        for k, v in (m or {}).items():
+            if isinstance(v, (str, int, float, bool, type(None))):
+                safe[k] = v
+            elif isinstance(v, (list, tuple)):
+                safe[k] = [x for x in v if isinstance(x, (str, int, float, bool))]
+        _safe_meta.append(safe)
+
+    _json.dump({
+        "problem_ids":   prob_ids,
+        "problem_slugs": prob_slugs,
+        "problem_meta":  _safe_meta,
+        "concepts":      concepts,
+        "num_nodes":     {"problem": n_problems, "concept": n_concepts},
+        "meta": {
+            "problem_feat_dim":  int(feat_dim),
+            "concept_feat_dim":  int(X_concept.shape[1]),
+            "feature_source":    C.FEATURE_SOURCE,
+            "feature_col":       C.PROBLEM_FEATURE_COL,
+            "concept_mode":      C.CONCEPT_FEATURE_MODE,
+            "graph_source":      C.GRAPH_SOURCE,
+            "stats":             stats,
+        },
+    }, open(graph_meta_path, "w", encoding="utf-8"), indent=2)
+
+    # ── Keep graph dict in memory for _verify and return ─────────────────────
+    # Also write the legacy .pt ONLY as a local scratch file (not committed).
+    # Loaders should use graph_tensors.npz + graph_meta.json instead.
+    torch.save(graph, C.GRAPH_PATH)   # scratch only — do NOT commit this file
     with open(C.CONCEPT_INDEX, "w", encoding="utf-8") as f:
         json.dump({c: i for i, c in enumerate(concepts)}, f, indent=2)
     print(f"\n[OK] graph saved   -> {C.GRAPH_PATH}")
