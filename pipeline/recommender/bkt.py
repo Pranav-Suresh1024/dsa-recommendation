@@ -2,7 +2,7 @@ import json
 from collections import defaultdict
 import numpy as np
 
-with open("/Users/shraddhasidhan/Downloads/normalized_graph_files/problem_topic_edges_normalized.json") as f:
+with open("question-graph/data/problem_topic_edges_normalized.json") as f:
     pt_edges = json.load(f)
 
 problem_to_topics = defaultdict(list)
