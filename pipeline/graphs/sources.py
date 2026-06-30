@@ -189,9 +189,19 @@ def load_curated_normalized() -> CuratedEdges:
         )
 
     def _src_tgt_pt(e):
-        """Handle both normalized (source/target) and raw (title_slug/topic_slug) formats."""
-        src = e.get("source") or e.get("title_slug") or e.get("problem_slug") or ""
-        tgt = e.get("target") or e.get("topic_slug") or ""
+        """
+        Handle all known problem-topic JSON field name variants:
+          normalized zip : source / target
+          raw Aashray    : source / target  (same -- confirmed from actual file)
+          potential alts : title_slug / topic_slug, problem_slug / topic_slug,
+                           problem_id / topic_id  (Greptile P1: previously missing)
+        Checking every known variant ensures curated HAS_TOPIC edges are
+        never silently dropped when the file format changes between runs.
+        """
+        src = (e.get("source") or e.get("title_slug")
+               or e.get("problem_slug") or e.get("problem_id") or "")
+        tgt = (e.get("target") or e.get("topic_slug")
+               or e.get("topic_id") or "")
         return str(src), str(tgt)
 
     raw_pt = _load_json(C.GRAPH_PROBLEM_TOPIC)

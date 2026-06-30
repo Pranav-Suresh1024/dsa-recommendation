@@ -249,11 +249,18 @@ def save_outputs(df: pd.DataFrame, output_dir: str) -> None:
             print("     To enable Parquet later: pip install pyarrow")
             _save_csv_fallback(df, out)
 
-    # JSON -- human-readable inspection
+    # JSON -- human-readable inspection (optional artifact)
+    # Wrapped in try/except: the clean parquet is already written above,
+    # so a filesystem or conversion error here should warn and continue,
+    # not abort the pipeline and make the run look like a failure.
     json_path = out / "vector_pool.json"
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(_to_json_safe(df), f, indent=2, ensure_ascii=False)
-    print(f"[[OK]] JSON           -> {json_path}")
+    try:
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(_to_json_safe(df), f, indent=2, ensure_ascii=False)
+        print(f"[[OK]] JSON           -> {json_path}")
+    except Exception as e:
+        print(f"[!]  JSON raw dump failed ({e.__class__.__name__}: {e}) -- skipping."
+              f"\n     The parquet output is complete; JSON is optional for inspection only.")
 
     # Schema report -- column audit
     report_path = out / "schema_report.txt"

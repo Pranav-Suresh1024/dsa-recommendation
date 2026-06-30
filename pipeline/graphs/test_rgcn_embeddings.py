@@ -96,9 +96,18 @@ def _r(ok, msg): return ok, f"  {PASS if ok else FAIL}  {msg}"
 # ===========================================================================
 
 def _hits_at_k(client, collection, points, k, tag_key):
-    """For each problem, retrieve top-K neighbours; hit = shares a tag with query."""
+    """
+    Compute Recall@K, MRR, and NDCG@K for a collection.
+
+    MRR  = mean reciprocal rank of the FIRST relevant result per query.
+           Stops scanning after the first hit (standard definition).
+    NDCG = normalised discounted cumulative gain over ALL K results.
+           Must NOT break early -- all K positions contribute to DCG.
+           The prior version broke after the first hit, so DCG was
+           identical to a rank-1-only score and NDCG was underreported.
+    """
     hits, mrr_sum, ndcg_sum = 0, 0.0, 0.0
-    ideal_dcg = sum(1.0 / np.log2(i + 2) for i in range(min(k, 10)))  # assume <=10 positives
+    ideal_dcg = sum(1.0 / np.log2(i + 2) for i in range(min(k, 10)))
     n = 0
     for p in points:
         query_tags = set(_tag(p, tag_key))
@@ -110,17 +119,19 @@ def _hits_at_k(client, collection, points, k, tag_key):
             limit=k + 1, with_payload=True, with_vectors=False
         ).points
         results = [r for r in results if r.id != p.id][:k]
+
+        mrr_credited = False   # only credit the first relevant hit for MRR
         dcg = 0.0
         for rank, r in enumerate(results, 1):
             if set(_tag(r, tag_key)) & query_tags:
-                hits += 1
-                # MRR uses only the FIRST hit per query (standard definition).
-                # The `break` below is what enforces this -- once we add
-                # 1/rank to mrr_sum we stop scanning this query's results,
-                # so this branch runs at most once per query by construction.
-                mrr_sum += 1.0 / rank
+                if not mrr_credited:
+                    hits += 1
+                    mrr_sum += 1.0 / rank
+                    mrr_credited = True
+                # DCG accumulates over ALL relevant results in the top-K,
+                # not just the first. Do not break here.
                 dcg += 1.0 / np.log2(rank + 1)
-                break
+
         ndcg_sum += dcg / max(ideal_dcg, 1e-9)
         n += 1
     if n == 0:
@@ -148,7 +159,15 @@ def test_recommendation_quality(client, collection, points, k_list=(10, 20), ver
 # ===========================================================================
 
 def _same_tag_at_k(client, collection, points, tag_key, k=10, n_queries=100):
-    """Fraction of top-K results sharing at least one tag with the query."""
+    """
+    Fraction of the top-K non-self results sharing at least one tag with the query.
+
+    Requests k+1 from Qdrant to leave room for the self-hit, then slices
+    back to exactly k after removing the query point. Without the slice,
+    same_topic@K is evaluated over up to k+1 neighbors when the query
+    point is absent from Qdrant's results, making the @K label inconsistent
+    across collections.
+    """
     hits, total = 0, 0
     candidates = [p for p in points if _tag(p, tag_key)][:n_queries]
     for p in candidates:
@@ -158,9 +177,10 @@ def _same_tag_at_k(client, collection, points, tag_key, k=10, n_queries=100):
             query=list(map(float, _vec(p))),
             limit=k + 1, with_payload=True, with_vectors=False
         ).points
-        for r in results:
-            if r.id == p.id:
-                continue
+        # Remove self then take exactly k -- ensures consistent @K evaluation
+        # regardless of whether Qdrant returned the query point itself.
+        top_k = [r for r in results if r.id != p.id][:k]
+        for r in top_k:
             if set(_tag(r, tag_key)) & query_tags:
                 hits += 1
             total += 1

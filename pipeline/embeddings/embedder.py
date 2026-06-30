@@ -78,9 +78,9 @@ def build_question_text(row: dict) -> str:
     topics   = _to_list(row.get("topic_tags"))
     algos    = _to_list(row.get("algorithm_tags"))
     patterns = _to_list(row.get("patterns"))
-    if topics:   tag_phrases.append("Topics: "     + ", ".join(t.replace("_", " ") for t in topics))
-    if algos:    tag_phrases.append("Algorithms: " + ", ".join(t.replace("_", " ") for t in algos))
-    if patterns: tag_phrases.append("Patterns: "   + ", ".join(t.replace("_", " ") for t in patterns))
+    if topics:   tag_phrases.append("Topics: "     + ", ".join(str(t).replace("_", " ") for t in topics))
+    if algos:    tag_phrases.append("Algorithms: " + ", ".join(str(t).replace("_", " ") for t in algos))
+    if patterns: tag_phrases.append("Patterns: "   + ", ".join(str(t).replace("_", " ") for t in patterns))
     if tag_phrases:
         parts.append(". ".join(tag_phrases))
 
